@@ -3,78 +3,64 @@ const cors = require("cors");
 const axios = require("axios");
 
 const app = express();
+
 app.use(cors());
-app.use(express.json());
+
+const SUPABASE_URL = "https://iyctkpzjrswlbjqmddoc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_UfGrL_jp_J73MXH7Olu-JQ_AGyRbKNB";
 
 app.get("/", (req, res) => {
-  res.send("API WeCars Valuador funcionando");
+  res.send("API WeCars funcionando");
 });
 
 app.get("/valuar", async (req, res) => {
   try {
-    const { marca, modelo, anio, version } = req.query;
 
-    if (!marca || !modelo || !anio) {
-      return res.status(400).json({
-        error: "Faltan datos: marca, modelo y anio son obligatorios"
-      });
-    }
+    const { marca, modelo, anio } = req.query;
 
-    const busqueda = `${marca} ${modelo} ${version || ""} ${anio}`.trim();
-
-    const url = `https://api.mercadolibre.com/sites/MLM/search?q=${encodeURIComponent(busqueda)}&category=MLM1744&limit=20`;
+    const url = `${SUPABASE_URL}/rest/v1/autos?marca=ilike.${marca}&modelo=ilike.${modelo}&anio=eq.${anio}`;
 
     const response = await axios.get(url, {
-  headers: {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json"
-  }
-});
-    const resultados = response.data.results || [];
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`
+      }
+    });
 
-    const publicaciones = resultados
-      .filter(item => item.price && item.price > 50000)
-      .map(item => ({
-        titulo: item.title,
-        precio: item.price,
-        link: item.permalink,
-        thumbnail: item.thumbnail
-      }));
+    const autos = response.data;
 
-    if (publicaciones.length === 0) {
+    if (!autos.length) {
       return res.json({
-        busqueda,
-        mensaje: "No se encontraron publicaciones suficientes",
-        publicaciones: []
+        encontrado: false,
+        mensaje: "No se encontraron vehículos"
       });
     }
 
-    const precios = publicaciones.map(p => p.precio).sort((a, b) => a - b);
-    const minimo = precios[0];
-    const maximo = precios[precios.length - 1];
+    const promedioCompra =
+      autos.reduce((a, b) => a + Number(b.precio_compra), 0) / autos.length;
 
-    const preciosAjustados = precios.length > 4 ? precios.slice(1, -1) : precios;
-    const promedio = preciosAjustados.reduce((a, b) => a + b, 0) / preciosAjustados.length;
+    const promedioVenta =
+      autos.reduce((a, b) => a + Number(b.precio_venta), 0) / autos.length;
 
     res.json({
-      busqueda,
-      precio_estimado: Math.round(promedio),
-      precio_minimo: minimo,
-      precio_maximo: maximo,
-      publicaciones_usadas: publicaciones.length,
-      publicaciones
+      encontrado: true,
+      total: autos.length,
+      precio_compra_promedio: Math.round(promedioCompra),
+      precio_venta_promedio: Math.round(promedioVenta),
+      resultados: autos.slice(0, 10)
     });
 
   } catch (error) {
+
     res.status(500).json({
-      error: "Error al consultar Mercado Libre",
-      detalle: error.message
+      error: error.message
     });
+
   }
 });
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log("Servidor funcionando");
 });
