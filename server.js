@@ -18,7 +18,13 @@ app.get("/valuar", async (req, res) => {
 
     const { marca, modelo, anio } = req.query;
 
-    const url = `${SUPABASE_URL}/rest/v1/autos?marca=ilike.${marca}&modelo=ilike.${modelo}&anio=eq.${anio}`;
+    let url = `${SUPABASE_URL}/rest/v1/autos?marca=ilike.${marca}&modelo=ilike.${modelo}&anio=eq.${anio}`;
+
+if (version) {
+  url += `&version=ilike.*${version}*`;
+}
+
+url += `&precio_venta=lt.1500000&precio_compra=lt.1400000`;
 
     const response = await axios.get(url, {
       headers: {
