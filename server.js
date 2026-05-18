@@ -13,7 +13,7 @@ const client = new OpenAI({
 });
 
 const SUPABASE_URL = "https://iyctkpzjrswlbjqmddoc.supabase.co";
-const SUPABASE_KEY = "TU_SUPABASE_KEY";
+const SUPABASE_KEY = "sb_publishable_UfGrL_jp_J73MXH7Olu-JQ_AGyRbKNB";
 
 app.get("/", (req, res) => {
   res.send("API WeCars IA funcionando");
