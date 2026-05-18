@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
 const OpenAI = require("openai");
 
 const app = express();
@@ -12,60 +11,31 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const SUPABASE_URL = "https://iyctkpzjrswlbjqmddoc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_UfGrL_jp_J73MXH7Olu-JQ_AGyRbKNB";
-
 app.get("/", (req, res) => {
-  res.send("API WeCars IA funcionando");
+  res.send("API WeCars valuador web funcionando");
 });
 
 app.get("/valuar", async (req, res) => {
-
   try {
+    const { marca, modelo, anio, version, kilometraje, cp } = req.query;
 
-    const {
-      marca,
-      modelo,
-      anio,
-      version,
-      kilometraje,
-      cp
-    } = req.query;
-
-    const url =
-      `${SUPABASE_URL}/rest/v1/autos` +
-      `?marca=ilike.*${marca}*` +
-      `&modelo=ilike.*${modelo}*` +
-      `&anio=eq.${anio}`;
-
-    const response = await axios.get(url, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`
-      }
-    });
-
-    const autos = response.data || [];
-
-    if (!autos.length) {
-
-      return res.json({
-        encontrado: false,
-        mensaje: "No se encontraron registros"
+    if (!marca || !modelo || !anio) {
+      return res.status(400).json({
+        error: "Faltan datos: marca, modelo y anio son obligatorios"
       });
-
     }
 
-    const promedioVenta =
-      autos.reduce((acc, a) => acc + Number(a.precio_venta || 0), 0)
-      / autos.length;
+    const busqueda = `${marca} ${modelo} ${version || ""} ${anio} usado precio México Mercado Libre Kavak Seminuevos`;
 
-    const promedioCompra =
-      autos.reduce((acc, a) => acc + Number(a.precio_compra || 0), 0)
-      / autos.length;
-
-    const prompt = `
-Analiza este vehículo en México.
+    const response = await client.responses.create({
+      model: "gpt-4.1-mini",
+      tools: [
+        {
+          type: "web_search_preview"
+        }
+      ],
+      input: `
+Busca en internet precios reales actuales en México para este auto:
 
 Marca: ${marca}
 Modelo: ${modelo}
@@ -74,50 +44,66 @@ Año: ${anio}
 Kilometraje: ${kilometraje || "No especificado"}
 Código postal: ${cp || "No especificado"}
 
-Promedio de mercado detectado:
-${Math.round(promedioVenta)} MXN
+Consulta referencias públicas como Mercado Libre, Kavak, Seminuevos, SoloAutos u otras páginas mexicanas.
 
-Promedio de compra:
-${Math.round(promedioCompra)} MXN
+IMPORTANTE:
+- No uses Supabase.
+- No inventes precios.
+- Descarta precios absurdos o publicaciones que no correspondan.
+- Si no hay datos suficientes, dilo claramente.
+- Devuelve SOLO JSON válido, sin markdown.
 
-Genera:
-- precio mercado estimado
-- rango compra recomendado
-- breve comentario comercial
-`;
+Formato exacto:
+{
+  "encontrado": true,
+  "vehiculo": "",
+  "precio_mercado_estimado": 0,
+  "rango_mercado": {
+    "minimo": 0,
+    "maximo": 0
+  },
+  "precio_compra_sugerido": {
+    "minimo": 0,
+    "maximo": 0
+  },
+  "fuentes_consultadas": [],
+  "comentario": ""
+}
 
-    const completion = await client.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages: [
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
+Búsqueda sugerida: ${busqueda}
+`
     });
 
-    const respuestaIA =
-      completion.choices[0].message.content;
+    let texto = response.output_text || "";
 
-    res.json({
-      encontrado: true,
-      precio_venta_promedio: Math.round(promedioVenta),
-      precio_compra_promedio: Math.round(promedioCompra),
-      analisis_ia: respuestaIA
-    });
+    texto = texto
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    let data;
+
+    try {
+      data = JSON.parse(texto);
+    } catch (e) {
+      data = {
+        encontrado: false,
+        error: "La IA no devolvió JSON válido",
+        respuesta: texto
+      };
+    }
+
+    res.json(data);
 
   } catch (error) {
-
     res.status(500).json({
       error: error.message
     });
-
   }
-
 });
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Servidor IA funcionando");
+  console.log("Servidor WeCars valuador web funcionando");
 });
