@@ -13,6 +13,15 @@ app.get("/", (req, res) => {
   res.send("API WeCars Valuador funcionando");
 });
 
+function normalizarTexto(texto = "") {
+  return texto
+    .toString()
+    .trim()
+    .toUpperCase()
+    .replace(/-/g, "")
+    .replace(/\s/g, "");
+}
+
 app.get("/valuar", async (req, res) => {
   try {
     const { marca, modelo, anio, version } = req.query;
@@ -23,13 +32,7 @@ app.get("/valuar", async (req, res) => {
       });
     }
 
-    let url = `${SUPABASE_URL}/rest/v1/autos?select=*&marca=ilike.${encodeURIComponent(marca)}&modelo=ilike.${encodeURIComponent(modelo)}&anio=eq.${encodeURIComponent(anio)}`;
-
-    if (version && version.trim() !== "") {
-      url += `&version=ilike.*${encodeURIComponent(version)}*`;
-    }
-
-    url += `&precio_venta=gte.50000&precio_venta=lte.1500000&precio_compra=gte.30000&precio_compra=lte.1400000`;
+    const url = `${SUPABASE_URL}/rest/v1/autos?select=*&marca=ilike.${encodeURIComponent(marca)}&anio=eq.${encodeURIComponent(anio)}&precio_venta=gte.50000&precio_venta=lte.1500000`;
 
     const response = await axios.get(url, {
       headers: {
@@ -40,74 +43,50 @@ app.get("/valuar", async (req, res) => {
 
     let autos = response.data || [];
 
-    if (!autos.length && version) {
-      const fallbackUrl = `${SUPABASE_URL}/rest/v1/autos?select=*&marca=ilike.${encodeURIComponent(marca)}&modelo=ilike.${encodeURIComponent(modelo)}&anio=eq.${encodeURIComponent(anio)}&precio_venta=gte.50000&precio_venta=lte.1500000&precio_compra=gte.30000&precio_compra=lte.1400000`;
+    const modeloBuscado = normalizarTexto(modelo);
+    const versionBuscada = normalizarTexto(version || "");
 
-      const fallbackResponse = await axios.get(fallbackUrl, {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`
-        }
-      });
+    autos = autos.filter(auto => {
+      const modeloBase = normalizarTexto(auto.modelo);
+      const versionBase = normalizarTexto(auto.version);
 
-      autos = fallbackResponse.data || [];
-    }
+      const coincideModelo =
+        modeloBase.includes(modeloBuscado) ||
+        modeloBuscado.includes(modeloBase);
+
+      const coincideVersion = versionBuscada
+        ? versionBase.includes(versionBuscada) || versionBuscada.includes(versionBase)
+        : true;
+
+      return coincideModelo && coincideVersion;
+    });
 
     if (!autos.length) {
       return res.json({
         encontrado: false,
-        mensaje: "No se encontraron vehículos con esos filtros"
+        mensaje: "No se encontraron vehículos con esos filtros",
+        sugerencia: "Prueba dejando versión vacía o escribe el modelo de otra forma, por ejemplo F150, F-150 o F 150."
       });
     }
 
-    const preciosVenta = autos
-      .map(a => Number(a.precio_venta))
-      .filter(n => !isNaN(n) && n > 0)
-      .sort((a, b) => a - b);
-
-    const preciosCompra = autos
-      .map(a => Number(a.precio_compra))
-      .filter(n => !isNaN(n) && n > 0)
-      .sort((a, b) => a - b);
+    const preciosVenta = autos.map(a => Number(a.precio_venta)).sort((a, b) => a - b);
+    const preciosCompra = autos.map(a => Number(a.precio_compra)).sort((a, b) => a - b);
 
     function mediana(arr) {
       const mitad = Math.floor(arr.length / 2);
-      if (arr.length % 2 === 0) {
-        return Math.round((arr[mitad - 1] + arr[mitad]) / 2);
-      }
-      return Math.round(arr[mitad]);
+      return arr.length % 2 === 0
+        ? Math.round((arr[mitad - 1] + arr[mitad]) / 2)
+        : Math.round(arr[mitad]);
     }
-
-    function promedioSinExtremos(arr) {
-      if (arr.length > 4) {
-        arr = arr.slice(1, -1);
-      }
-      return Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
-    }
-
-    const precioVentaMediana = mediana(preciosVenta);
-    const precioCompraMediana = mediana(preciosCompra);
 
     res.json({
       encontrado: true,
       total: autos.length,
-      busqueda: {
-        marca,
-        modelo,
-        anio,
-        version: version || null
-      },
-      precio_mercado_estimado: precioVentaMediana,
-      precio_compra_estimado: precioCompraMediana,
-      precio_venta_promedio_ajustado: promedioSinExtremos(preciosVenta),
-      precio_compra_promedio_ajustado: promedioSinExtremos(preciosCompra),
+      precio_mercado_estimado: mediana(preciosVenta),
+      precio_compra_estimado: mediana(preciosCompra),
       rango_venta: {
         minimo: preciosVenta[0],
         maximo: preciosVenta[preciosVenta.length - 1]
-      },
-      rango_compra: {
-        minimo: preciosCompra[0],
-        maximo: preciosCompra[preciosCompra.length - 1]
       },
       resultados: autos.slice(0, 15)
     });
