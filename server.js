@@ -54,7 +54,7 @@ app.get("/buscar-modelos", async (req, res) => {
     res.json({
       total: autos.length,
       modelos_unicos: [...new Set(autos.map(a => a.modelo))],
-      resultados: autos.slice(0, 100)
+      resultados: autos.slice(0, 1000)
     });
 
   } catch (error) {
@@ -75,7 +75,7 @@ app.get("/valuar", async (req, res) => {
       });
     }
 
-    const url = `${SUPABASE_URL}/rest/v1/autos?select=*&marca=ilike.${encodeURIComponent(marca)}&anio=eq.${encodeURIComponent(anio)}&precio_venta=gte.50000&precio_venta=lte.1500000&precio_compra=gte.30000&precio_compra=lte.1400000`;
+    const url = `${SUPABASE_URL}/rest/v1/autos?select=*&marca=ilike.${encodeURIComponent(marca)}&anio=eq.${encodeURIComponent(anio)}&precio_venta=gte.50000&precio_venta=lte.5000000&precio_compra=gte.30000&precio_compra=lte.4500000`;
 
     const response = await axios.get(url, {
       headers: {
@@ -108,7 +108,7 @@ app.get("/valuar", async (req, res) => {
       return res.json({
         encontrado: false,
         mensaje: "No se encontraron vehículos con esos filtros",
-        sugerencia: "Consulta /buscar-modelos?marca=FORD&anio=2023 para ver cómo está guardado el modelo."
+        sugerencia: "Prueba otra versión o consulta /buscar-modelos?marca=FORD&anio=2024"
       });
     }
 
