@@ -1,46 +1,42 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const OpenAI = require("openai");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-const SUPABASE_URL = "https://iyctkpzjrswlbjqmddoc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_UfGrL_jp_J73MXH7Olu-JQ_AGyRbKNB";
-
-function normalizarTexto(texto = "") {
-  return texto
-    .toString()
-    .trim()
-    .toUpperCase()
-    .replace(/-/g, "")
-    .replace(/\s/g, "");
-}
-
-function mediana(arr) {
-  if (!arr.length) return 0;
-  const mitad = Math.floor(arr.length / 2);
-  return arr.length % 2 === 0
-    ? Math.round((arr[mitad - 1] + arr[mitad]) / 2)
-    : Math.round(arr[mitad]);
-}
-
-app.get("/", (req, res) => {
-  res.send("API WeCars Valuador funcionando");
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
 });
 
-app.get("/buscar-modelos", async (req, res) => {
+const SUPABASE_URL = "https://iyctkpzjrswlbjqmddoc.supabase.co";
+const SUPABASE_KEY = "TU_SUPABASE_KEY";
+
+app.get("/", (req, res) => {
+  res.send("API WeCars IA funcionando");
+});
+
+app.get("/valuar", async (req, res) => {
+
   try {
-    const { marca, anio } = req.query;
 
-    if (!marca || !anio) {
-      return res.status(400).json({
-        error: "Faltan datos: marca y anio son obligatorios"
-      });
-    }
+    const {
+      marca,
+      modelo,
+      anio,
+      version,
+      kilometraje,
+      cp
+    } = req.query;
 
-    const url = `${SUPABASE_URL}/rest/v1/autos?select=marca,modelo,anio,version,precio_compra,precio_venta&marca=ilike.${encodeURIComponent(marca)}&anio=eq.${encodeURIComponent(anio)}`;
+    const url =
+      `${SUPABASE_URL}/rest/v1/autos` +
+      `?marca=ilike.*${marca}*` +
+      `&modelo=ilike.*${modelo}*` +
+      `&anio=eq.${anio}`;
 
     const response = await axios.get(url, {
       headers: {
@@ -51,109 +47,77 @@ app.get("/buscar-modelos", async (req, res) => {
 
     const autos = response.data || [];
 
-    res.json({
-      total: autos.length,
-      modelos_unicos: [...new Set(autos.map(a => a.modelo))],
-      resultados: autos.slice(0, 1000)
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      error: "Error al consultar modelos",
-      detalle: error.message
-    });
-  }
-});
-
-app.get("/valuar", async (req, res) => {
-  try {
-    const { marca, modelo, anio, version } = req.query;
-
-    if (!marca || !modelo || !anio) {
-      return res.status(400).json({
-        error: "Faltan datos: marca, modelo y anio son obligatorios"
-      });
-    }
-
-    const url = `${SUPABASE_URL}/rest/v1/autos?select=*&marca=ilike.${encodeURIComponent(marca)}&anio=eq.${encodeURIComponent(anio)}&precio_venta=gte.50000&precio_venta=lte.5000000&precio_compra=gte.30000&precio_compra=lte.4500000`;
-
-    const response = await axios.get(url, {
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`
-      }
-    });
-
-    let autos = response.data || [];
-
-    const modeloBuscado = normalizarTexto(modelo);
-    const versionBuscada = normalizarTexto(version || "");
-
-    autos = autos.filter(auto => {
-      const modeloBase = normalizarTexto(auto.modelo);
-      const versionBase = normalizarTexto(auto.version);
-
-      const coincideModelo =
-        modeloBase.includes(modeloBuscado) ||
-        modeloBuscado.includes(modeloBase);
-
-      const coincideVersion = versionBuscada
-        ? versionBase.includes(versionBuscada) || versionBuscada.includes(versionBase)
-        : true;
-
-      return coincideModelo && coincideVersion;
-    });
-
     if (!autos.length) {
+
       return res.json({
         encontrado: false,
-        mensaje: "No se encontraron vehículos con esos filtros",
-        sugerencia: "Prueba otra versión o consulta /buscar-modelos?marca=FORD&anio=2024"
+        mensaje: "No se encontraron registros"
       });
+
     }
 
-    const preciosVenta = autos
-      .map(a => Number(a.precio_venta))
-      .filter(n => !isNaN(n) && n > 0)
-      .sort((a, b) => a - b);
+    const promedioVenta =
+      autos.reduce((acc, a) => acc + Number(a.precio_venta || 0), 0)
+      / autos.length;
 
-    const preciosCompra = autos
-      .map(a => Number(a.precio_compra))
-      .filter(n => !isNaN(n) && n > 0)
-      .sort((a, b) => a - b);
+    const promedioCompra =
+      autos.reduce((acc, a) => acc + Number(a.precio_compra || 0), 0)
+      / autos.length;
+
+    const prompt = `
+Analiza este vehículo en México.
+
+Marca: ${marca}
+Modelo: ${modelo}
+Versión: ${version || "No especificada"}
+Año: ${anio}
+Kilometraje: ${kilometraje || "No especificado"}
+Código postal: ${cp || "No especificado"}
+
+Promedio de mercado detectado:
+${Math.round(promedioVenta)} MXN
+
+Promedio de compra:
+${Math.round(promedioCompra)} MXN
+
+Genera:
+- precio mercado estimado
+- rango compra recomendado
+- breve comentario comercial
+`;
+
+    const completion = await client.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ]
+    });
+
+    const respuestaIA =
+      completion.choices[0].message.content;
 
     res.json({
       encontrado: true,
-      total: autos.length,
-      busqueda: {
-        marca,
-        modelo,
-        anio,
-        version: version || null
-      },
-      precio_mercado_estimado: mediana(preciosVenta),
-      precio_compra_estimado: mediana(preciosCompra),
-      rango_venta: {
-        minimo: preciosVenta[0],
-        maximo: preciosVenta[preciosVenta.length - 1]
-      },
-      rango_compra: {
-        minimo: preciosCompra[0],
-        maximo: preciosCompra[preciosCompra.length - 1]
-      },
-      resultados: autos.slice(0, 20)
+      precio_venta_promedio: Math.round(promedioVenta),
+      precio_compra_promedio: Math.round(promedioCompra),
+      analisis_ia: respuestaIA
     });
 
   } catch (error) {
+
     res.status(500).json({
-      error: "Error al consultar Supabase",
-      detalle: error.message
+      error: error.message
     });
+
   }
+
 });
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Servidor funcionando en puerto ${PORT}`);
+  console.log("Servidor IA funcionando");
 });
