@@ -1,138 +1,199 @@
 const express = require("express");
-const cors = require("cors");
 const OpenAI = require("openai");
+const axios = require("axios");
 
 const app = express();
 
-app.use(cors());
-
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
-  if (req.method === "OPTIONS") return res.sendStatus(200);
-  next();
-});
-
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-const client = new OpenAI({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
 app.get("/", (req, res) => {
-  res.send("API WeCars valuador web funcionando");
+  res.send("WeCars WhatsApp Bot + Monday funcionando");
 });
 
-app.get("/valuar", async (req, res) => {
-  try {
-    const { marca, modelo, anio, version, kilometraje, cp } = req.query;
+async function crearItemMonday(datos) {
+  const columnValues = {
+    marca: datos.marca || "",
+    modelo: datos.modelo || "",
+    version: datos.version || "",
+    anio: datos.anio ? Number(datos.anio) : "",
+    kilometraje: datos.kilometraje ? Number(datos.kilometraje) : "",
+    precio: datos.precio ? Number(datos.precio) : "",
+    ciudad: datos.ciudad || "",
+    factura: datos.factura || "",
+    telefono: datos.telefono || "",
+    comentarios: datos.comentarios || "",
+    estatus: "Pendiente"
+  };
 
-    if (!marca || !modelo || !anio) {
-      return res.status(400).json({
-        error: "Faltan datos: marca, modelo y anio son obligatorios"
+  const query = `
+    mutation ($boardId: ID!, $itemName: String!, $columnValues: JSON!) {
+      create_item (
+        board_id: $boardId,
+        item_name: $itemName,
+        column_values: $columnValues
+      ) {
+        id
+      }
+    }
+  `;
+
+  const variables = {
+    boardId: process.env.MONDAY_BOARD_ID,
+    itemName: `${datos.marca || "AUTO"} ${datos.modelo || ""} ${datos.anio || ""}`.trim(),
+    columnValues: JSON.stringify(columnValues)
+  };
+
+  const response = await axios.post(
+    "https://api.monday.com/v2",
+    {
+      query,
+      variables
+    },
+    {
+      headers: {
+        Authorization: process.env.MONDAY_API_KEY,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  return response.data;
+}
+
+app.post("/webhook", async (req, res) => {
+  try {
+    const mensaje = req.body.Body || "";
+    const telefono = req.body.From || "";
+    const nombre = req.body.ProfileName || "";
+
+    const totalImagenes = Number(req.body.NumMedia || 0);
+    const imagenes = [];
+
+    for (let i = 0; i < totalImagenes; i++) {
+      imagenes.push({
+        url: req.body[`MediaUrl${i}`],
+        tipo: req.body[`MediaContentType${i}`]
       });
     }
 
-    const response = await client.responses.create({
+    console.log("Mensaje recibido:", mensaje);
+    console.log("Teléfono:", telefono);
+    console.log("Nombre:", nombre);
+    console.log("Imágenes:", imagenes);
+
+    const completion = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
-      tools: [{ type: "web_search_preview" }],
-      input: `
-Actúa como valuador profesional de autos usados en México para WeCars.
+      messages: [
+        {
+          role: "system",
+          content: `
+Extrae información de vehículos usados en México.
 
-Vehículo:
-Marca: ${marca}
-Modelo: ${modelo}
-Versión: ${version || "No especificada"}
-Año: ${anio}
-Kilometraje: ${kilometraje || "No especificado"}
-Código postal: ${cp || "No especificado"}
+Devuelve SOLO JSON válido.
 
-INSTRUCCIONES OBLIGATORIAS:
-1. Busca precios reales actuales en internet.
-2. Usa mínimo 3 referencias cuando sea posible:
-   - Kavak México o referencia similar de compra/venta profesional
-   - Mercado Libre Autos
-   - Seminuevos / SoloAutos / agencias / Marketplace si aparece disponible
-3. Separa precios por tipo:
-   - precio_publicacion: precios anunciados al público
-   - precio_retail_profesional: precio tipo Kavak/agencia
-   - precio_compra_sugerido: precio recomendable para que WeCars compre o tome a cuenta
-4. NO uses precios inflados.
-5. Descarta publicaciones que no correspondan a la versión, año o modelo.
-6. Si hay precios muy altos o muy bajos, descártalos como outliers.
-7. Usa mediana o rango lógico, no promedio simple.
-8. El precio de compra sugerido debe estar normalmente entre 15% y 25% debajo del precio real de mercado, dependiendo de rotación, kilometraje y riesgo.
-9. Si no encuentras fuentes suficientes, responde encontrado:false.
-10. Devuelve SOLO JSON válido, sin markdown.
-
-Formato exacto:
+Formato:
 {
-  "encontrado": true,
-  "vehiculo": "",
-  "precio_mercado_real": 0,
-  "rango_publicacion": {
-    "minimo": 0,
-    "maximo": 0
-  },
-  "precio_retail_profesional": {
-    "minimo": 0,
-    "maximo": 0
-  },
-  "precio_compra_sugerido": {
-    "minimo": 0,
-    "maximo": 0
-  },
-  "margen_estimado": {
-    "minimo": 0,
-    "maximo": 0
-  },
-  "fuentes_consultadas": [
-    {
-      "fuente": "",
-      "precio_detectado": 0,
-      "tipo": "",
-      "url": ""
-    }
-  ],
-  "comentario": ""
+  "intencion": "",
+  "marca": "",
+  "modelo": "",
+  "version": "",
+  "anio": "",
+  "kilometraje": "",
+  "precio": "",
+  "ciudad": "",
+  "factura": "",
+  "comentarios": "",
+  "faltantes": [],
+  "prioridad": ""
 }
 
-Búsqueda sugerida:
-${marca} ${modelo} ${version || ""} ${anio} precio México usado Kavak Mercado Libre Seminuevos
+Reglas:
+- Si no detectas algún dato, déjalo vacío.
+- Si parece que quieren vender/ofrecer un auto, usa intencion: "ofrecer_auto".
+- Si el mensaje no trata de un auto, usa intencion: "otro".
+- Si viene al menos una imagen, no pongas "fotos" como faltante.
+- Prioridad alta si trae marca, modelo, año, precio y fotos.
 `
+        },
+        {
+          role: "user",
+          content: `
+Mensaje:
+${mensaje}
+
+Teléfono:
+${telefono}
+
+Nombre:
+${nombre}
+
+Cantidad de imágenes:
+${totalImagenes}
+
+Imágenes:
+${imagenes.map(img => img.url).join("\n")}
+`
+        }
+      ]
     });
 
-    let texto = response.output_text || "";
+    let respuestaIA = completion.choices[0].message.content;
 
-    texto = texto
+    respuestaIA = respuestaIA
       .replace(/```json/g, "")
       .replace(/```/g, "")
       .trim();
 
-    let data;
+    let clasificacion;
 
     try {
-      data = JSON.parse(texto);
-    } catch (e) {
-      data = {
-        encontrado: false,
-        error: "La IA no devolvió JSON válido",
-        respuesta: texto
+      clasificacion = JSON.parse(respuestaIA);
+    } catch (error) {
+      clasificacion = {
+        intencion: "error_parseo",
+        comentarios: respuestaIA
       };
     }
 
-    res.json(data);
+    console.log("Clasificación IA:", clasificacion);
+
+    if (clasificacion.intencion === "ofrecer_auto") {
+      const resultadoMonday = await crearItemMonday({
+        marca: clasificacion.marca,
+        modelo: clasificacion.modelo,
+        version: clasificacion.version,
+        anio: clasificacion.anio,
+        kilometraje: clasificacion.kilometraje,
+        precio: clasificacion.precio,
+        ciudad: clasificacion.ciudad,
+        factura: clasificacion.factura,
+        telefono,
+        comentarios: `
+Nombre: ${nombre}
+Mensaje original: ${mensaje}
+Comentarios IA: ${clasificacion.comentarios || ""}
+Imágenes: ${imagenes.map(img => img.url).join(" | ")}
+`
+      });
+
+      console.log("Item creado en Monday:", resultadoMonday);
+    }
+
+    res.status(200).send("ok");
 
   } catch (error) {
-    res.status(500).json({
-      error: error.message
-    });
+    console.error("Error en webhook:", error.response?.data || error.message);
+    res.status(500).send("error");
   }
 });
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Servidor WeCars valuador web funcionando");
+  console.log("Servidor funcionando en puerto " + PORT);
 });
